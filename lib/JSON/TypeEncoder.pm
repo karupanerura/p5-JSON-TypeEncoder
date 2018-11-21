@@ -53,7 +53,7 @@ sub _json_src_dict {
     my @src;
     my %types = @{$type->parameters};
     my @keys = sort keys %types;
-    for (my $i = 0; $i < @keys; $i++) {
+    for my $i (keys @keys) {
         my $key      = $keys[$i];
         my $stype    = $types{$key};
         my $sobj_src = "${obj_src}->{$key}";
@@ -75,7 +75,7 @@ sub _json_src_dict {
         push @src => $src;
     }
 
-    sprintf(q!'{%s}'!, join "", @src);
+    sprintf(q!(_validate_hash_ref(!.$obj_src.q!) && '{%s}')!, join "", @src);
 }
 
 sub _json_src_tuple {
@@ -95,17 +95,17 @@ sub _json_src_arrayref {
     my @src;
     my $stype = $type->parameters->[0];
     my $src = $self->_json_src('$_', $stype);
-    sprintf(q!'[' . (do {my $src; for (@{%s}) { $src .= (%s) . ',' }; substr($src,0,-1) }) . ']'!, $obj_src, $src);
+    sprintf(q!'[' . (do {my $src; for (@{_validate_array_ref(%s)}) { $src .= (%s) . ',' }; substr($src,0,-1) }) . ']'!, $obj_src, $src);
 }
 
 sub _json_src_str {
     my ($self, $value_src) = @_;
-    qq!'"' . $value_src . '"'!
+    qq!'"' . _escape(_validate_str($value_src)) . '"'!
 }
 
 sub _json_src_num {
     my ($self, $value_src) = @_;
-    qq!$value_src+0!
+    qq!_validate_num($value_src)!
 }
 
 sub _json_src_bool {
@@ -117,6 +117,48 @@ sub _is_subtype {
     my ($type, $other) = @_;
     return unless $type;
     $type->name eq $other->name || _is_subtype($type->parent, $other)
+}
+
+sub _validate_hash_ref {
+    ref $_[0] eq 'HASH' or die "not hash ref";
+    $_[0];
+}
+
+sub _validate_array_ref {
+    ref $_[0] eq 'ARRAY' or die "not array ref";
+    $_[0];
+}
+
+sub _validate_num {
+    use warnings FATAL => qw/numeric/;
+    0+$_[0];
+}
+
+sub _validate_str {
+    use overload;
+    (!ref $_[0] || overload::OverloadedStringify($_[0])) or die "not string";
+    $_[0];
+}
+
+{
+    my %ESCAPE = (
+        "\n" => '\n',
+        "\r" => '\r',
+        "\t" => '\t',
+        "\f" => '\f',
+        "\b" => '\b',
+        "\"" => '\"',
+        "\\" => '\\\\',
+        "\'" => '\\\'',
+    );
+
+    sub _escape {
+        for ($_[0]) {
+            s/([\x22\x5c\n\r\t\f\b])/$ESCAPE{$1}/g;
+            s/([\x00-\x08\x0b\x0e-\x1f])/'\\u00' . unpack('H2', $1)/eg;
+        }
+        $_[0];
+    }
 }
 
 1;
